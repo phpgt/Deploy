@@ -20,8 +20,7 @@
 	},
 	"autoload-dev": {
 		"psr-4": {
-			"GT\\Deploy\\Test\\": "./test/phpunit",
-			"Gt\\Deploy\\Test\\": "./test/phpunit"
+			"GT\\Deploy\\Test\\": "./test/phpunit"
 		}
 	},
 	"config": {
@@ -34,14 +33,14 @@
 	],
 	"scripts": {
 		"phpunit": "vendor/bin/phpunit --configuration phpunit.xml",
-		"phpstan": "vendor/bin/phpstan analyse --level 6 src --memory-limit 256M",
 		"phpcs": "vendor/bin/phpcs src --standard=phpcs.xml",
 		"phpmd": "vendor/bin/phpmd src/ text phpmd.xml",
+		"phpstan": "vendor/bin/phpstan analyse --level 6 src --memory-limit 256M",
 		"test": [
 			"@phpunit",
-			"@phpstan",
 			"@phpcs",
-			"@phpmd"
+			"@phpmd",
+			"@phpstan"
 		]
 	},
 	"funding": [

@@ -1,0 +1,20 @@
+#!/usr/bin/env php
+<?php
+use GT\Deploy\Cli\RunCommand;
+use Gt\Cli\Application;
+use Gt\Cli\Argument\CommandArgumentList;
+
+foreach([ __DIR__ . "/../../..", __DIR__ . "/../vendor" ] as $vendor) {
+	$autoload = "$vendor/autoload.php";
+	if(file_exists($autoload)) {
+		require($autoload);
+		break;
+	}
+}
+
+$application = new Application(
+	"Deployment tools for PHP projects",
+	new CommandArgumentList("run", ...$argv),
+	new RunCommand()
+);
+$application->run();

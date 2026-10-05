@@ -1,0 +1,53 @@
+{
+	"name": "phpgt/deploy",
+	"description": "Deployment tools for PHP projects.",
+	"license": "MIT",
+	"require": {
+		"php": ">=8.3",
+		"phpgt/cli": "^1.4"
+	},
+	"require-dev": {
+		"phpunit/phpunit": "^12.5",
+		"phpstan/phpstan": "^2.2",
+		"phpmd/phpmd": "^2.15",
+		"squizlabs/php_codesniffer": "^4.0"
+	},
+	"autoload": {
+		"psr-4": {
+			"GT\\Deploy\\": "./src",
+			"Gt\\Deploy\\": "./src"
+		}
+	},
+	"autoload-dev": {
+		"psr-4": {
+			"GT\\Deploy\\Test\\": "./test/phpunit",
+			"Gt\\Deploy\\Test\\": "./test/phpunit"
+		}
+	},
+	"config": {
+		"platform": {
+			"php": "8.3.0"
+		}
+	},
+	"bin": [
+		"bin/deploy"
+	],
+	"scripts": {
+		"phpunit": "vendor/bin/phpunit --configuration phpunit.xml",
+		"phpstan": "vendor/bin/phpstan analyse --level 6 src --memory-limit 256M",
+		"phpcs": "vendor/bin/phpcs src --standard=phpcs.xml",
+		"phpmd": "vendor/bin/phpmd src/ text phpmd.xml",
+		"test": [
+			"@phpunit",
+			"@phpstan",
+			"@phpcs",
+			"@phpmd"
+		]
+	},
+	"funding": [
+		{
+			"type": "github",
+			"url": "https://github.com/sponsors/PhpGt"
+		}
+	]
+}

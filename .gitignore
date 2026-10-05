@@ -1,0 +1,7 @@
+/.idea
+/vendor
+/*.phar
+.phpunit*
+/test/phpunit/.phpunit.cache/
+# Local wiki symlink
+docs

@@ -1,6 +1,10 @@
 <?php
 namespace GT\Deploy\Test\Cli;
 
+use GT\Deploy\Cli\RunCommand;
+use Gt\Cli\Application;
+use Gt\Cli\Argument\CommandArgumentList;
+
 use PHPUnit\Framework\TestCase;
 
 class RunCommandTest extends TestCase {
@@ -16,6 +20,21 @@ class RunCommandTest extends TestCase {
 		self::assertSame(0, $exitCode);
 		self::assertStringContainsString("Deploy a PHP application", $output);
 		self::assertSame("", $error);
+	}
+
+	public function testApplicationPropagatesDeploymentFailure():void {
+		$application = new Application(
+			"Deployment tools for PHP projects",
+			new CommandArgumentList("run", "deploy"),
+			new RunCommand(),
+		);
+		$application->setStream("php://memory", "php://memory", "php://memory");
+		$exitCode = null;
+		$application->setExitHandler(function(int $code) use (&$exitCode):void {
+			$exitCode = $code;
+		});
+		$application->run();
+		self::assertSame(1, $exitCode);
 	}
 
 	/** @return array{int, string, string} */

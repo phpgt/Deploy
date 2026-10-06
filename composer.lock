@@ -4,20 +4,20 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "dd9f25a3df025f6f4874ec2a929d5d3d",
+    "content-hash": "2e06ffce9abc55132512f8bb40df74d3",
     "packages": [
         {
             "name": "phpgt/cli",
-            "version": "v1.4.0",
+            "version": "v2.0.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/phpgt/Cli.git",
-                "reference": "84a1b720efe836624313061ac42e81dd7d9c2948"
+                "reference": "0b7824aee62e63a8bde05777da7cfa5f1edd3e21"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phpgt/Cli/zipball/84a1b720efe836624313061ac42e81dd7d9c2948",
-                "reference": "84a1b720efe836624313061ac42e81dd7d9c2948",
+                "url": "https://api.github.com/repos/phpgt/Cli/zipball/0b7824aee62e63a8bde05777da7cfa5f1edd3e21",
+                "reference": "0b7824aee62e63a8bde05777da7cfa5f1edd3e21",
                 "shasum": ""
             },
             "require": {
@@ -30,12 +30,12 @@
                 "phpmd/phpmd": "^2.13",
                 "phpstan/phpstan": "^1.10",
                 "phpunit/phpunit": "^10.5",
-                "squizlabs/php_codesniffer": "^3.7"
+                "squizlabs/php_codesniffer": "^4.0"
             },
             "type": "library",
             "autoload": {
                 "psr-4": {
-                    "Gt\\Cli\\": "./src"
+                    "GT\\Cli\\": "./src"
                 }
             },
             "notification-url": "https://packagist.org/downloads/",
@@ -45,7 +45,7 @@
             "authors": [
                 {
                     "name": "Greg Bowler",
-                    "email": "greg.bowler@g105b.com"
+                    "email": "greg@g105b.com"
                 }
             ],
             "description": "Command line interface builder.",
@@ -57,15 +57,15 @@
             ],
             "support": {
                 "issues": "https://github.com/phpgt/Cli/issues",
-                "source": "https://github.com/phpgt/Cli/tree/v1.4.0"
+                "source": "https://github.com/phpgt/Cli/tree/v2.0.0"
             },
             "funding": [
                 {
-                    "url": "https://github.com/sponsors/PhpGt",
+                    "url": "https://github.com/sponsors/phpgt",
                     "type": "github"
                 }
             ],
-            "time": "2026-03-08T23:28:56+00:00"
+            "time": "2026-08-10T11:22:34+00:00"
         },
         {
             "name": "phpgt/daemon",

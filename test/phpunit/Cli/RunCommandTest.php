@@ -2,8 +2,8 @@
 namespace GT\Deploy\Test\Cli;
 
 use GT\Deploy\Cli\RunCommand;
-use Gt\Cli\Application;
-use Gt\Cli\Argument\CommandArgumentList;
+use GT\Cli\Application;
+use GT\Cli\Argument\CommandArgumentList;
 
 use PHPUnit\Framework\TestCase;
 

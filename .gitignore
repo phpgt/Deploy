@@ -5,3 +5,4 @@
 /test/phpunit/.phpunit.cache/
 # Local wiki symlink
 docs
+/_coverage/

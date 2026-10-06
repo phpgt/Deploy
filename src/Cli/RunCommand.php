@@ -1,16 +1,16 @@
 <?php
 namespace GT\Deploy\Cli;
 
-use Gt\Cli\Argument\ArgumentValueList;
-use Gt\Cli\Command\Command;
-use Gt\Cli\Parameter\NamedParameter;
-use Gt\Cli\Parameter\Parameter;
-use Gt\Cli\Stream;
+use GT\Cli\Argument\ArgumentValueList;
+use GT\Cli\Command\Command;
+use GT\Cli\Parameter\NamedParameter;
+use GT\Cli\Parameter\Parameter;
+use GT\Cli\StreamName;
 
 class RunCommand extends Command {
 	public function run(?ArgumentValueList $arguments = null):int {
 		unset($arguments);
-		$this->writeLine("Deployment is not implemented yet.", Stream::ERROR);
+		$this->writeLine("Deployment is not implemented yet.", StreamName::ERROR);
 		return 1;
 	}
 

@@ -61,7 +61,7 @@ jobs:
         php: [ '8.3', '8.4', '8.5' ]
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: build-artifact-${{ matrix.php }}
           path: /tmp/github-actions
@@ -95,7 +95,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: code-coverage-${{ matrix.php }}-${{ github.run_number }}
           path: _coverage
@@ -118,7 +118,7 @@ jobs:
         php: [ '8.3', '8.4', '8.5' ]
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: build-artifact-${{ matrix.php }}
           path: /tmp/github-actions
@@ -142,7 +142,7 @@ jobs:
         php: [ '8.3', '8.4', '8.5' ]
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: build-artifact-${{ matrix.php }}
           path: /tmp/github-actions
@@ -165,7 +165,7 @@ jobs:
         php: [ '8.3', '8.4', '8.5' ]
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: build-artifact-${{ matrix.php }}
           path: /tmp/github-actions

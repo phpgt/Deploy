@@ -3,9 +3,18 @@ updates:
   - package-ecosystem: composer
     directory: "/"
     schedule:
-      interval: daily
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/London
     open-pull-requests-limit: 10
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/London
+    groups:
+      github-actions:
+        patterns: ["*"]

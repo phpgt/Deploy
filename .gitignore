@@ -6,3 +6,5 @@
 # Local wiki symlink
 docs
 /_coverage/
+
+config.*.ini

@@ -4,8 +4,12 @@ use GT\Deploy\Cli\RunCommand;
 use Gt\Cli\Application;
 use Gt\Cli\Argument\CommandArgumentList;
 
-foreach([ __DIR__ . "/../../..", __DIR__ . "/../vendor" ] as $vendor) {
-	$autoload = "$vendor/autoload.php";
+$autoloadPaths = [
+	$GLOBALS["_composer_autoload_path"] ?? "",
+	__DIR__ . "/../../../autoload.php",
+	__DIR__ . "/../vendor/autoload.php",
+];
+foreach($autoloadPaths as $autoload) {
 	if(file_exists($autoload)) {
 		require($autoload);
 		break;

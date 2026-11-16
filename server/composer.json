@@ -1,0 +1,16 @@
+{
+	"name": "phpgt/deploy-server",
+	"description": "The PHP.Gt deployment reservation service.",
+	"type": "project",
+	"license": "MIT",
+	"require": {
+		"php": ">=8.4",
+		"phpgt/webengine": "^5.1",
+		"phpgt/ulid": "^1.2"
+	},
+	"autoload": {
+		"psr-4": {
+			"App\\": "class/"
+		}
+	}
+}

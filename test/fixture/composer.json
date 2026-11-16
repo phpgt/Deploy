@@ -1,0 +1,7 @@
+{
+    "name": "phpgt/deploy-fixture",
+    "description": "Application used by deployment integration tests.",
+    "license": "MIT",
+    "require": { "phpgt/webengine": "^5.1" },
+    "config": { "platform": { "php": "8.4.0" } }
+}

@@ -1,0 +1,143 @@
+<?php
+namespace GT\Deploy;
+
+use GuzzleHttp\Client;
+use GuzzleHttp\ClientInterface;
+use GuzzleHttp\Psr7\Uri;
+use GuzzleHttp\Psr7\UriResolver;
+use RuntimeException;
+use Psr\Http\Message\RequestInterface;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\UriInterface;
+
+readonly class DeploymentClient {
+	public function __construct(private ClientInterface $client = new Client()) {
+	}
+
+	public function reserve(string $server, ?string $token = null):Reservation {
+		$headers = ["Accept" => "application/json"];
+		if($token !== null) {
+			$headers["Authorization"] = "Bearer $token";
+		}
+
+		$response = $this->client->request("POST", "$server/deployment/", [
+			"headers" => $headers, "connect_timeout" => 5, "timeout" => 15,
+			"allow_redirects" => $this->redirects("$server/deployment/"), "http_errors" => false,
+		]);
+		$status = $response->getStatusCode();
+		if($status < 200 || $status >= 300) {
+			$message = match($status) {
+				401 => "Invalid deployment token (HTTP 401). Check deploy.token before retrying.",
+				410 => "Deployment token expired (HTTP 410). Remove deploy.token and deploy.token_server to reserve a new deployment.",
+				default => "Deployment reservation failed (HTTP $status).",
+			};
+			throw new RuntimeException($message);
+		}
+
+		$reservation = $this->readReservation((string)$response->getBody(), $server);
+		if($token !== null && !hash_equals($token, $reservation->token)) {
+			throw new RuntimeException("The server returned a different deployment token.");
+		}
+
+		return $reservation;
+	}
+
+	private function readReservation(string $body, string $server):Reservation {
+		$reservation = json_decode($body, flags: JSON_THROW_ON_ERROR);
+		if(!is_object($reservation)
+		|| !is_string($reservation->url ?? null)
+		|| !filter_var($reservation->url, FILTER_VALIDATE_URL)
+		|| !in_array(parse_url($reservation->url, PHP_URL_SCHEME), ["http", "https"], true)
+		|| !is_string($reservation->token ?? null)
+		|| !preg_match('/^[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{42}$/D', $reservation->token)
+		|| !is_string($reservation->upload_url ?? null)) {
+			throw new RuntimeException("The deployment server returned an invalid reservation.");
+		}
+
+		return new Reservation($reservation->url, $reservation->token, $this->uploadUrl($server, $reservation->upload_url));
+	}
+
+	/** @SuppressWarnings("PHPMD.StaticAccess") */
+	private function uploadUrl(string $server, string $uploadUrl):string {
+		$base = new Uri("$server/");
+		$upload = UriResolver::resolve($base, new Uri($uploadUrl));
+		if($upload->getScheme() !== $base->getScheme() || $upload->getAuthority() !== $base->getAuthority()) {
+			throw new RuntimeException("The upload URL must use the configured deployment server.");
+		}
+
+		return (string)$upload;
+	}
+
+	/** @param callable(int, int):void $progress */
+	public function upload(Reservation $reservation, string $archive, callable $progress):void {
+		$stream = fopen($archive, "rb");
+		if($stream === false) {
+			throw new RuntimeException("Unable to open deployment archive.");
+		}
+
+		try {
+			$response = $this->client->request("POST", $reservation->uploadUrl, [
+				"headers" => ["Accept" => "application/json", "Content-Type" => "application/gzip", "Authorization" => "Bearer $reservation->token"],
+				"body" => $stream, "connect_timeout" => 5, "timeout" => 300,
+				"allow_redirects" => $this->redirects($reservation->uploadUrl), "http_errors" => false,
+				"progress" => function(float $downloadTotal, float $downloaded, float $uploadTotal, float $uploaded) use ($progress):void {
+					unset($downloadTotal, $downloaded);
+					$progress((int)$uploaded, (int)$uploadTotal);
+				},
+			]);
+			$status = $response->getStatusCode();
+			if($status < 200 || $status >= 300) {
+				throw new RuntimeException("Archive upload failed (HTTP $status). Run gt deploy to retry using the saved token.");
+			}
+
+			$result = json_decode((string)$response->getBody(), flags: JSON_THROW_ON_ERROR);
+			if(!is_object($result) || ($result->status ?? null) !== "uploaded") {
+				throw new RuntimeException("The deployment server did not confirm the upload.");
+			}
+		}
+		finally {
+			if(is_resource($stream)) {
+				fclose($stream);
+			}
+		}
+	}
+
+	public function initialise(string $server, string $token):void {
+		$url = "$server/initialise/";
+		$response = $this->client->request("POST", $url, [
+			"headers" => ["Accept" => "application/json", "Authorization" => "Bearer $token"],
+			"connect_timeout" => 5, "timeout" => 90,
+			"allow_redirects" => $this->redirects($url), "http_errors" => false,
+		]);
+		$status = $response->getStatusCode();
+		$body = (string)$response->getBody();
+		if($status < 200 || $status >= 300) {
+			$result = json_decode($body);
+			$detail = is_object($result) && is_string($result->error ?? null)
+				? ": " . str_replace($token, "[redacted]", $result->error)
+				: "";
+			throw new RuntimeException("Deployment initialisation failed (HTTP $status)$detail");
+		}
+
+		$result = json_decode($body, flags: JSON_THROW_ON_ERROR);
+		if(!is_object($result) || ($result->status ?? null) !== "prepared") {
+			throw new RuntimeException("The deployment server did not confirm source extraction.");
+		}
+	}
+
+	/** @return array<string, mixed> */
+	private function redirects(string $url):array {
+		$origin = new Uri($url);
+		return [
+			"max" => 3, "strict" => true, "protocols" => ["http", "https"],
+			"on_redirect" => function(RequestInterface $request, ResponseInterface $response, UriInterface $destination) use ($origin):void {
+				unset($request);
+				if(!in_array($response->getStatusCode(), [307, 308], true)
+				|| $destination->getScheme() !== $origin->getScheme()
+				|| $destination->getAuthority() !== $origin->getAuthority()) {
+					throw new RuntimeException("Deployment requests only follow same-origin 307 or 308 redirects.");
+				}
+			},
+		];
+	}
+}

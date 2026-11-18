@@ -1,16 +1,17 @@
 #!/bin/sh
-# Docker runtime prototype; the public upload API does not invoke this script.
+# Build and activate a prepared source directory inside Docker.
 set -eu
 umask 077
 root=$1
 release=$2
-app="gt-$3"
+id=$3
+app="gt-$id"
 port=$4
 database=$5
 php_version=$6
 health_path=$7
 migrate=$8
-for tool in docker tar curl flock; do command -v "$tool" >/dev/null || { echo "Missing server prerequisite: $tool" >&2; exit 1; }; done
+for tool in docker curl flock php; do command -v "$tool" >/dev/null || { echo "Missing server prerequisite: $tool" >&2; exit 1; }; done
 docker info >/dev/null
 cd "$root"
 root=$(pwd)
@@ -24,7 +25,7 @@ if [ -f "$root/application" ]; then
 else
     printf '%s\n' "$app" > "$root/application"
 fi
-mkdir -p "$stage/source" "$stage/frontend" "$root/shared"
+mkdir -p "$stage/source" "$root/shared"
 chmod 755 "$root/shared"
 image="$app:$release"
 candidate="$app-check-$release"
@@ -49,17 +50,8 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' HUP TERM
-# Reject archive links: the build context must not depend on files outside the project.
-if tar -tvzf "$incoming/source.tar.gz" | grep -Eq '^[lh]'; then
-    echo 'Source archive contains links. Replace them with project files or exclude them in .deployignore.' >&2
-    exit 1
-fi
-tar -xzf "$incoming/source.tar.gz" -C "$stage/source" --no-same-owner
+cp -a "$incoming/source/." "$stage/source/"
 cp -R "$incoming/tooling" "$stage/tooling"
-if [ -f "$stage/source/package.json" ]; then
-    test -f "$stage/source/package-lock.json" || { echo 'package.json requires a committed package-lock.json.' >&2; exit 1; }
-    cp "$stage/source/package.json" "$stage/source/package-lock.json" "$stage/frontend/"
-fi
 # Never send local runtime overrides to the image, even if an archive was made externally.
 rm -f "$stage/source/config.dev.ini" "$stage/source/config.deploy.ini" "$stage/source/config.production.ini"
 # A persistent marker prevents accidental database engine changes on later deployments.
@@ -80,7 +72,13 @@ fi
 # Docker manages the persistent data directory; it is never part of a release cleanup.
 docker volume inspect "$app-data" >/dev/null 2>&1 || docker volume create --label "phpgt.application=$app" "$app-data" >/dev/null
 test "$(docker volume inspect --format '{{ index .Labels "phpgt.application" }}' "$app-data")" = "$app" || exit 1
-config="$root/shared/config.production.ini"
+mkdir -p "$root/shared/config"
+# Only this application receives the directory mount; PHP-FPM must be able to traverse it.
+chmod 0755 "$root/shared/config"
+config="$root/shared/config/config.production.ini"
+if [ -f "$root/shared/config.production.ini" ] && [ ! -f "$config" ]; then
+    mv "$root/shared/config.production.ini" "$config"
+fi
 if [ "$database" = external ] && [ ! -f "$config" ]; then
     echo "Create $config with production [database] settings, then deploy again." >&2
     exit 1
@@ -123,10 +121,17 @@ printf '[app]\nproduction=true\n[logger]\ndebug_to_javascript=false\n[session]\n
 # The HTTP-only initial release needs cookie_secure=false only when explicitly configured by the user.
 chmod 644 "$config"
 echo 'Building application image...'
-docker build --build-arg "PHP_VERSION=$php_version" -f "$stage/tooling/Dockerfile" -t "$image" "$stage"
+DOCKER_BUILDKIT=1 docker build --build-arg "PHP_VERSION=$php_version" -f "$stage/tooling/Dockerfile" -t "$image" "$stage"
 run_app() {
-    docker run --label "phpgt.application=$app" --network "$app" \
-        -v "$app-data:/data" -v "$config:/app/config.production.ini:ro" "$@"
+    if [ -n "${DEPLOY_DATA_VOLUME:-}" ]; then
+        docker run --label "phpgt.application=$app" --network "$app" \
+            -v "$app-data:/data" \
+            -e GT_DEPLOY_CONFIG_DIRECTORY=/deployment-config \
+            --mount "type=volume,src=$DEPLOY_DATA_VOLUME,dst=/deployment-config,volume-subpath=deployment/$id/shared/config,readonly" "$@"
+    else
+        docker run --label "phpgt.application=$app" --network "$app" \
+            -v "$app-data:/data" -v "$config:/app/config.production.ini:ro" "$@"
+    fi
 }
 if [ "$migrate" = auto ]; then
     if [ -d "$stage/source/query/_migration" ] && [ "$database" != none ]; then migrate=true; else migrate=false; fi
@@ -134,7 +139,7 @@ fi
 if [ "$migrate" = true ] || [ "$migrate" = 1 ]; then
     test "$database" != none || { echo 'Migrations require a database.' >&2; exit 1; }
     echo 'Running production migrations...'
-    run_app --rm "$image" php vendor/bin/migrate
+    run_app --rm "$image" gt migrate
 fi
 wait_http() {
     for _attempt in $(seq 1 30); do
@@ -145,7 +150,7 @@ wait_http() {
     return 1
 }
 echo 'Checking candidate release...'
-run_app -d --name "$candidate" -p 127.0.0.1::80 "$image" >/dev/null
+run_app -e GT_CRON_ENABLED=0 -d --name "$candidate" -p 127.0.0.1::80 "$image" >/dev/null
 candidate_port=$(docker port "$candidate" 80/tcp | sed 's/.*://')
 wait_http "$candidate_port" || { docker logs "$candidate"; echo 'Candidate failed its health check.' >&2; exit 1; }
 docker rm -f "$candidate" >/dev/null
@@ -156,8 +161,18 @@ if docker container inspect "$app" >/dev/null 2>&1; then
 fi
 # There is a short interruption while the fixed port changes containers.
 new_started=true
-run_app -d --name "$app" --restart unless-stopped -p "$port:80" "$image" >/dev/null
+if [ "$port" = auto ]; then
+    binding=127.0.0.1::80
+else
+    binding="127.0.0.1:$port:80"
+fi
+run_app -d --name "$app" --restart unless-stopped -p "$binding" "$image" >/dev/null
+port=$(docker port "$app" 80/tcp | sed 's/.*://')
 wait_http "$port" || { docker logs "$app"; echo 'New release failed; restoring previous container.' >&2; exit 1; }
+run_app --rm "$image" php /usr/local/lib/phpgt/configuration.php > "$root/configuration-keys.json"
+php "$stage/tooling/runtime-state.php" "$root/configuration-keys.json" "$port" "$app" "$release" > "$root/runtime.json.part"
+rm "$root/configuration-keys.json"
+mv "$root/runtime.json.part" "$root/runtime.json"
 ln -sfn "releases/$release" "$root/current"
 switched=true
 if [ "$old_stopped" = true ]; then docker rm "$previous" >/dev/null; fi

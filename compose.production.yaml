@@ -1,0 +1,19 @@
+services:
+  api:
+    environment:
+      DEPLOY_DOMAIN: ${DEPLOY_DOMAIN:-deploy.php.gt}
+      DEPLOY_SCHEME: https
+      DEPLOY_PUBLIC_PORT: ${DEPLOY_HTTPS_PORT:-443}
+  worker:
+    environment:
+      DEPLOY_DOMAIN: ${DEPLOY_DOMAIN:-deploy.php.gt}
+      DEPLOY_SCHEME: https
+      DEPLOY_PUBLIC_PORT: ${DEPLOY_HTTPS_PORT:-443}
+  gateway:
+    environment:
+      DEPLOY_DOMAIN: ${DEPLOY_DOMAIN:-deploy.php.gt}
+      DEPLOY_HTTPS_PORT: ${DEPLOY_HTTPS_PORT:-443}
+      DEPLOY_REDIRECT_PORT: ${DEPLOY_REDIRECT_PORT:-80}
+    volumes:
+      - ./server/docker/tls.conf.template:/etc/nginx/templates/tls.conf.template:ro
+      - ${DEPLOY_CERT_DIRECTORY:?Set DEPLOY_CERT_DIRECTORY to the directory containing fullchain.pem and privkey.pem}:/etc/deploy/certs:ro

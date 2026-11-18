@@ -1,0 +1,20 @@
+server {
+    listen ${DEPLOY_REDIRECT_PORT};
+    server_name ${DEPLOY_DOMAIN} *.${DEPLOY_DOMAIN};
+    return 308 https://$host:${DEPLOY_HTTPS_PORT}$request_uri;
+}
+server {
+    listen ${DEPLOY_HTTPS_PORT} ssl;
+    server_name ${DEPLOY_DOMAIN} *.${DEPLOY_DOMAIN};
+    ssl_certificate /etc/deploy/certs/fullchain.pem;
+    ssl_certificate_key /etc/deploy/certs/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    client_max_body_size 100m;
+    location / {
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_buffering off;
+        proxy_pass http://127.0.0.1:${DEPLOY_HTTP_PORT};
+    }
+}

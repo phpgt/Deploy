@@ -1,0 +1,6 @@
+#!/bin/sh
+case "$DEPLOY_DOMAIN" in
+    ''|*[!a-zA-Z0-9.-]*) echo 'Invalid DEPLOY_DOMAIN' >&2; exit 1 ;;
+esac
+export DEPLOY_DOMAIN_PATTERN
+DEPLOY_DOMAIN_PATTERN=$(printf '%s' "$DEPLOY_DOMAIN" | sed 's/\./\\./g')

@@ -32,6 +32,48 @@ class ApplicationRepositoryTest extends TestCase {
 		rmdir($this->directory);
 	}
 
+	public function testCreateDeployment_usesConfiguredPublicOrigin():void {
+		$sut = new ApplicationRepository("$this->directory/deployment", "deploy.localhost", "http", 8080);
+		$reservation = $sut->createDeployment();
+		self::assertSame("http://$reservation->id.deploy.localhost:8080", $reservation->url);
+	}
+
+	public function testGetRoute_isPendingUntilActivationAndKeepsTheActivePortAfterFailure():void {
+		$sut = new ApplicationRepository("$this->directory/deployment");
+		$reservation = $sut->createDeployment();
+		$host = "$reservation->id.deploy.php.gt";
+		self::assertSame("reserved", $sut->getRoute($host)->status);
+		self::assertNull($sut->getRoute($host)->port);
+		$path = "$this->directory/deployment/$reservation->id";
+		file_put_contents("$path/runtime.json", '{"port":12345}');
+		self::assertSame(12345, $sut->getRoute($host)->port);
+		$record = json_decode(file_get_contents("$path/reservation.json"), true);
+		$record["status"] = "failed";
+		file_put_contents("$path/reservation.json", json_encode($record));
+		self::assertSame(12345, $sut->getRoute($host)->port);
+		self::assertSame("failed", $sut->getRoute($host)->status);
+	}
+
+	public function testGetRoute_rejectsUnknownHostsAndInvalidPorts():void {
+		$sut = new ApplicationRepository("$this->directory/deployment");
+		$reservation = $sut->createDeployment();
+		self::assertNull($sut->getRoute("$reservation->id.attacker.example"));
+		self::assertNull($sut->getRoute("../../etc/passwd.deploy.php.gt"));
+		self::assertNull($sut->getRoute("0000000000000000.deploy.php.gt"));
+		file_put_contents("$this->directory/deployment/$reservation->id/runtime.json", '{"port":"127.0.0.1:9000/attack"}');
+		self::assertNull($sut->getRoute("$reservation->id.deploy.php.gt"));
+	}
+
+	public function testGetRoute_doesNotServeExpiredDeployments():void {
+		$sut = new ApplicationRepository("$this->directory/deployment");
+		$reservation = $sut->createDeployment();
+		$filename = "$this->directory/deployment/$reservation->id/reservation.json";
+		$record = json_decode(file_get_contents($filename), true);
+		$record["expires_at"] = gmdate("c", time() - 1);
+		file_put_contents($filename, json_encode($record));
+		self::assertNull($sut->getRoute("$reservation->id.deploy.php.gt"));
+	}
+
 	public function testCreateDeployment_persistsDistinctReservations():void {
 		$sut = new ApplicationRepository("$this->directory/deployment");
 
@@ -60,6 +102,65 @@ class ApplicationRepositoryTest extends TestCase {
 		self::assertStringNotContainsString($first->token, $original);
 		self::assertSame(42, strlen($first->token));
 		self::assertEqualsWithDelta(time() * 1000, (new Ulid(init: $first->token))->getTimestamp(), 2000);
+	}
+
+	public function testGetConfiguredKeys_returnsNamesOnlyForTheAuthenticatedDeployment():void {
+		$sut = new ApplicationRepository("$this->directory/deployment");
+		$reservation = $sut->createDeployment();
+		file_put_contents("$this->directory/deployment/$reservation->id/runtime.json", '{"port":12345,"configuration_keys":["database.driver","mail.api_key"]}');
+		self::assertSame(["database.driver", "mail.api_key"], $sut->getConfiguredKeys($reservation->token));
+	}
+
+	public function testGetConfiguredKeys_requiresRuntimeMetadata():void {
+		$sut = new ApplicationRepository("$this->directory/deployment");
+		$reservation = $sut->createDeployment();
+		$this->expectException(RuntimeException::class);
+		$this->expectExceptionCode(409);
+		$sut->getConfiguredKeys($reservation->token);
+	}
+
+	public function testConfigureNext_appliesOwnedJobAndRemovesItsSecretPayload():void {
+		$sut = new ApplicationRepository("$this->directory/deployment");
+		$reservation = $sut->createDeployment();
+		$path = "$this->directory/deployment/$reservation->id";
+		file_put_contents("$path/runtime.json", '{"port":12345,"release":"source-test","configuration_keys":[]}');
+		$values = new \App\ConfigurationValues('{"values":{"email.api_key":"private-job-secret"}}');
+		$job = $sut->queueConfiguration($reservation->token, $values);
+		self::assertSame("queued", $sut->getConfigurationUpdate($reservation->token, $job->id)->status);
+		$file = "$path/configuration/$job->id.json";
+		self::assertSame(0600, fileperms($file) & 0777);
+		$runtime = $this->createMock(\App\DockerRuntime::class);
+		$runtime->expects(self::once())->method("configure")->with($path, $reservation->id, ["email.api_key" => "private-job-secret"]);
+		self::assertTrue($sut->configureNext($runtime));
+		self::assertSame("applied", $sut->getConfigurationUpdate($reservation->token, $job->id)->status);
+		self::assertStringNotContainsString("private-job-secret", file_get_contents($file));
+		self::assertFalse($sut->configureNext($runtime));
+	}
+
+	public function testGetConfigurationUpdate_doesNotExposeAnotherDeploymentsJob():void {
+		$sut = new ApplicationRepository("$this->directory/deployment");
+		$first = $sut->createDeployment();
+		$second = $sut->createDeployment();
+		file_put_contents("$this->directory/deployment/$first->id/runtime.json", '{"release":"source-test"}');
+		$job = $sut->queueConfiguration($first->token, new \App\ConfigurationValues('{"values":{"email.key":"private"}}'));
+		$this->expectException(RuntimeException::class);
+		$this->expectExceptionCode(404);
+		$sut->getConfigurationUpdate($second->token, $job->id);
+	}
+
+	public function testConfigureNext_failureRemovesPayloadAndReportsSafeError():void {
+		$sut = new ApplicationRepository("$this->directory/deployment");
+		$reservation = $sut->createDeployment();
+		$path = "$this->directory/deployment/$reservation->id";
+		file_put_contents("$path/runtime.json", '{"release":"source-test"}');
+		$job = $sut->queueConfiguration($reservation->token, new \App\ConfigurationValues('{"values":{"email.key":"private"}}'));
+		$runtime = $this->createMock(\App\DockerRuntime::class);
+		$runtime->expects(self::once())->method("configure")->willThrowException(new RuntimeException("private"));
+		$sut->configureNext($runtime);
+		$result = $sut->getConfigurationUpdate($reservation->token, $job->id);
+		self::assertSame("failed", $result->status);
+		self::assertStringNotContainsString("private", $result->error);
+		self::assertStringNotContainsString("private", file_get_contents("$path/configuration/$job->id.json"));
 	}
 
 	public function testGetByToken_returnsTheSameReservation():void {
@@ -233,6 +334,73 @@ class ApplicationRepositoryTest extends TestCase {
 		$this->expectException(RuntimeException::class);
 		$this->expectExceptionCode(409);
 		$sut->initialise($reservation->token);
+	}
+
+	public function testQueueBuild_requiresPreparedSource():void {
+		$sut = new ApplicationRepository("$this->directory/deployment");
+		$reservation = $sut->createDeployment();
+		$this->expectException(RuntimeException::class);
+		$this->expectExceptionCode(409);
+		$sut->queueBuild($reservation->token);
+	}
+
+	public function testBuildNext_claimsAndDeploysQueuedSource():void {
+		$sut = new ApplicationRepository("$this->directory/deployment");
+		$reservation = $sut->createDeployment();
+		$archive = $this->sourceArchive("source");
+		$sut->upload($reservation->token, $this->archiveStream($archive));
+		$prepared = $sut->initialise($reservation->token);
+		self::assertSame("queued", $sut->queueBuild($reservation->token)->status);
+		$runtime = $this->createMock(\App\DockerRuntime::class);
+		$runtime->expects(self::once())->method("deploy")->with(
+			"$this->directory/deployment/$reservation->id", $prepared->source, $reservation->id,
+		)->willReturnCallback(function() use ($sut, $reservation):void {
+			self::assertSame("building", $sut->getBuildStatus($reservation->token)->status);
+			try {
+				$sut->upload($reservation->token, $this->archiveStream(gzencode("new source")));
+				self::fail("Upload must be locked during a build.");
+			}
+			catch(RuntimeException $exception) {
+				self::assertSame(409, $exception->getCode());
+			}
+		});
+		self::assertTrue($sut->buildNext($runtime));
+		self::assertSame("deployed", $sut->getBuildStatus($reservation->token)->status);
+		self::assertSame("deployed", $sut->queueBuild($reservation->token)->status);
+		self::assertFalse($sut->buildNext($runtime));
+		self::assertSame($reservation->id, $sut->getByToken($reservation->token)->id);
+	}
+
+	public function testBuildNext_failureIsRecordedAndCanBeRetried():void {
+		$sut = new ApplicationRepository("$this->directory/deployment");
+		$reservation = $sut->createDeployment();
+		$sut->upload($reservation->token, $this->archiveStream($this->sourceArchive("source")));
+		$sut->initialise($reservation->token);
+		$sut->queueBuild($reservation->token);
+		$runtime = $this->createMock(\App\DockerRuntime::class);
+		$runtime->expects(self::exactly(2))->method("deploy")->willReturnCallback(function():void {
+			static $attempt = 0;
+			if($attempt++ === 0) {
+				throw new RuntimeException("Private build details");
+			}
+		});
+		self::assertTrue($sut->buildNext($runtime));
+		self::assertSame("failed", $sut->getBuildStatus($reservation->token)->status);
+		self::assertStringNotContainsString("Private", $sut->getBuildStatus($reservation->token)->error);
+		$sut->queueBuild($reservation->token);
+		self::assertTrue($sut->buildNext($runtime));
+		self::assertSame("deployed", $sut->getBuildStatus($reservation->token)->status);
+	}
+
+	public function testQueueBuild_doesNotBuildOldSourceAfterANewUpload():void {
+		$sut = new ApplicationRepository("$this->directory/deployment");
+		$reservation = $sut->createDeployment();
+		$sut->upload($reservation->token, $this->archiveStream($this->sourceArchive("first")));
+		$sut->initialise($reservation->token);
+		$sut->upload($reservation->token, $this->archiveStream($this->sourceArchive("second")));
+		$this->expectException(RuntimeException::class);
+		$this->expectExceptionCode(409);
+		$sut->queueBuild($reservation->token);
 	}
 
 	private function sourceArchive(string $contents, ?string $extra = null):string {

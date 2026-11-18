@@ -30,6 +30,43 @@ class ProjectConfigurationTest extends TestCase {
 		rmdir($this->directory);
 	}
 
+	public function testGetOverrideValues_selectsKeySectionAndAllWithoutManagedValues():void {
+		file_put_contents("$this->directory/config.dev.ini", "[deploy]\ntoken=not-for-upload\n[app]\nproduction=false\n[email]\napi_key=development-key\nenabled=false\nport=0\n[other]\nname=example\n");
+		file_put_contents("$this->directory/config.remote.ini", "[email]\napi_key=production-key\n");
+		$sut = new ProjectConfiguration();
+		self::assertSame(["email.api_key" => "development-key"], $sut->getOverrideValues($this->directory, "email.api_key"));
+		self::assertSame(["email.api_key" => "development-key", "email.enabled" => "0", "email.port" => "0"], $sut->getOverrideValues($this->directory, "email"));
+		self::assertSame(["email.api_key" => "development-key", "email.enabled" => "0", "email.port" => "0", "other.name" => "example"], $sut->getOverrideValues($this->directory, "*"));
+	}
+
+	public function testGetOverrideValues_rejectsUnknownSelector():void {
+		$sut = new ProjectConfiguration();
+		$this->expectException(\RuntimeException::class);
+		$this->expectExceptionMessage("No local application configuration matches");
+		$sut->getOverrideValues($this->directory, "unknown");
+	}
+
+	public function testGetOverrideKeys_listsSortedUniqueKeysWithoutDeploymentCredentials():void {
+		file_put_contents("$this->directory/config.dev.ini", "[deploy]\ntoken=private-token\nserver=http://localhost\n[email]\napi_key=private-value\nenabled=false\n");
+		file_put_contents("$this->directory/config.remote.ini", "[email]\napi_key=another-private-value\n[other]\nmissing=\n");
+		$sut = new ProjectConfiguration();
+		self::assertSame(["email.api_key", "email.enabled", "other.missing"], $sut->getOverrideKeys($this->directory));
+	}
+
+	public function testGetOverrideKeys_doesNotIncludeBaseConfig():void {
+		file_put_contents("$this->directory/config.ini", "[public]\nname=already-uploaded\n");
+		$sut = new ProjectConfiguration();
+		self::assertSame([], $sut->getOverrideKeys($this->directory));
+	}
+
+	public function testGetOverrideKeys_invalidConfigDoesNotExposeItsContents():void {
+		file_put_contents("$this->directory/config.remote.ini", "[invalid\npassword=secret-value\n");
+		$sut = new ProjectConfiguration();
+		$this->expectException(\RuntimeException::class);
+		$this->expectExceptionMessage("Unable to parse local configuration.");
+		$sut->getOverrideKeys($this->directory);
+	}
+
 	public function testSaveToken_preservesExistingSettingsAndRestrictsPermissions():void {
 		file_put_contents("$this->directory/config.dev.ini", "[deploy]\nserver=http://localhost:9090\n[example]\nname=preserved\n");
 		$sut = new ProjectConfiguration();

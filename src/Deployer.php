@@ -77,7 +77,7 @@ class Deployer {
 
 	private function trackedFiles(string $directory):?string {
 		$parent = realpath($directory);
-		while($parent !== false && !file_exists("$parent/.git")) {
+		while($parent !== false && !$this->hasGitMetadata($parent)) {
 			$next = dirname($parent);
 			if($next === $parent) {
 				return null;
@@ -100,6 +100,10 @@ class Deployer {
 		}
 		file_put_contents($manifest, implode("\0", $files) . ($files === [] ? "" : "\0"));
 		return $manifest;
+	}
+
+	private function hasGitMetadata(string $directory):bool {
+		return is_file("$directory/.git") || is_file("$directory/.git/HEAD");
 	}
 
 	private function assertNoSymlink(string $directory, string $file):void {

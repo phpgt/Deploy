@@ -2,6 +2,15 @@
     "name": "phpgt/deploy-fixture",
     "description": "Application used by deployment integration tests.",
     "license": "MIT",
-    "require": { "phpgt/webengine": "^5.1" },
-    "config": { "platform": { "php": "8.4.0" } }
+    "require": {
+        "phpgt/webengine": "^5.1"
+    },
+    "config": {
+        "platform": {
+            "php": "8.4.0"
+        }
+    },
+    "scripts": {
+        "deploy-init": "@php -r 'if(!is_file(\"npm-ready\")) {exit(1);} file_put_contents(\"style/setup.css\", \"/* initialised */\");'"
+    }
 }

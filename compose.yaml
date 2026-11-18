@@ -1,0 +1,65 @@
+name: phpgt-deploy
+
+x-server: &server
+  build:
+    context: .
+    dockerfile: server/docker/Dockerfile
+  network_mode: host
+  restart: unless-stopped
+  init: true
+  environment: &settings
+    DEPLOY_DOMAIN: ${DEPLOY_DOMAIN:-deploy.localhost}
+    DEPLOY_SCHEME: ${DEPLOY_SCHEME:-http}
+    DEPLOY_PUBLIC_PORT: ${DEPLOY_PUBLIC_PORT:-8080}
+    DEPLOY_FPM_PORT: ${DEPLOY_FPM_PORT:-19000}
+    DEPLOY_DATABASE: ${DEPLOY_DATABASE:-sqlite}
+  volumes:
+    - deployment-data:/opt/deploy/server/data
+
+services:
+  api:
+    <<: *server
+    build:
+      context: .
+      dockerfile: server/docker/Dockerfile
+      target: api
+    command: ["php-fpm", "--nodaemonize"]
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(is_resource(@fsockopen('127.0.0.1', getenv('DEPLOY_FPM_PORT'))) ? 0 : 1);"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+
+  worker:
+    <<: *server
+    build:
+      context: .
+      dockerfile: server/docker/Dockerfile
+      target: worker
+    command: ["php", "bin/build", "--watch"]
+    environment:
+      <<: *settings
+      DEPLOY_DATA_VOLUME: ${COMPOSE_PROJECT_NAME:-phpgt-deploy}-data
+    volumes:
+      - deployment-data:/opt/deploy/server/data
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  gateway:
+    image: nginx:1.28-bookworm
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      DEPLOY_DOMAIN: ${DEPLOY_DOMAIN:-deploy.localhost}
+      DEPLOY_HTTP_PORT: ${DEPLOY_HTTP_PORT:-8080}
+      DEPLOY_FPM_PORT: ${DEPLOY_FPM_PORT:-19000}
+      NGINX_ENVSUBST_FILTER: ^DEPLOY_
+    volumes:
+      - ./server/docker/gateway.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./server/docker/domain.envsh:/docker-entrypoint.d/15-domain.envsh:ro
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  deployment-data:
+    name: ${COMPOSE_PROJECT_NAME:-phpgt-deploy}-data

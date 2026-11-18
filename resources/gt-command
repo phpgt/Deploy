@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+if [ "${1:-}" = config ] && [ "${2:-}" = set ]; then
+    shift 2
+    exec php /usr/local/lib/phpgt/config-set.php "$@"
+fi
+exec /opt/phpgt/vendor/bin/gt "$@"

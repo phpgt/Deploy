@@ -1,0 +1,7 @@
+{
+    "name": "phpgt/deploy-toolchain",
+    "description": "Locked gt installation for deployment containers.",
+    "license": "MIT",
+    "require": { "phpgt/gtcommand": "1.4.0" },
+    "config": { "platform": { "php": "8.4.0" } }
+}

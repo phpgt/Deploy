@@ -1,0 +1,64 @@
+map $http_x_forwarded_proto $deployment_scheme {
+    default $scheme;
+    https https;
+    http http;
+}
+server {
+    listen 127.0.0.1:${DEPLOY_HTTP_PORT} default_server;
+    server_name _;
+    return 404;
+}
+server {
+    listen 127.0.0.1:${DEPLOY_HTTP_PORT};
+    server_name ${DEPLOY_DOMAIN};
+    client_max_body_size 100m;
+    location / {
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME /opt/deploy/server/vendor/phpgt/webengine/go.php;
+        fastcgi_param DOCUMENT_ROOT /opt/deploy/server/www;
+        fastcgi_param HTTP_AUTHORIZATION $http_authorization;
+        fastcgi_pass 127.0.0.1:${DEPLOY_FPM_PORT};
+    }
+}
+server {
+    listen 127.0.0.1:${DEPLOY_HTTP_PORT};
+    server_name "~^[a-f0-9]{16}\.${DEPLOY_DOMAIN_PATTERN}$";
+    client_max_body_size 100m;
+
+    location = /_deployment_route {
+        internal;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME /opt/deploy/server/vendor/phpgt/webengine/go.php;
+        fastcgi_param DOCUMENT_ROOT /opt/deploy/server/www;
+        fastcgi_param REQUEST_URI /route/;
+        fastcgi_param REQUEST_METHOD GET;
+        fastcgi_param QUERY_STRING "";
+        fastcgi_param CONTENT_LENGTH "";
+        fastcgi_param HTTP_HOST $host;
+        fastcgi_param HTTP_ACCEPT application/json;
+        fastcgi_pass_request_body off;
+        fastcgi_pass_request_headers off;
+        fastcgi_pass 127.0.0.1:${DEPLOY_FPM_PORT};
+    }
+    location / {
+        auth_request /_deployment_route;
+        auth_request_set $deployment_upstream $upstream_http_x_deployment_upstream;
+        auth_request_set $deployment_status $upstream_http_x_deployment_status;
+        error_page 401 = @pending;
+        error_page 403 = @unknown;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Proto $deployment_scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_buffering off;
+        proxy_pass http://$deployment_upstream;
+    }
+    location @pending {
+        default_type text/html;
+        add_header Cache-Control no-store always;
+        add_header Retry-After 5 always;
+        return 503 '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="5"><title>Deployment</title><h1>Deployment status: $deployment_status</h1><p>This page refreshes automatically. Check gt deploy for build errors.</p>';
+    }
+    location @unknown {
+        return 404;
+    }
+}

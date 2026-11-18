@@ -1,11 +1,13 @@
 <?php
 use App\ApplicationRepository;
+use GT\Config\Config;
 use GT\Http\Header\ResponseHeaders;
 use GT\Http\Request;
 use GT\Json\Schema\JSONDocument;
 
 function go(
 	Request $request,
+	Config $config,
 	JSONDocument $document,
 	ResponseHeaders $headers,
 ):void {
@@ -17,7 +19,11 @@ function go(
 		return;
 	}
 
-	$repository = new ApplicationRepository();
+	$repository = new ApplicationRepository(
+		domain: $config->get("server.domain") ?? "deploy.php.gt",
+		scheme: $config->get("server.scheme") ?? "https",
+		port: $config->get("server.port") === null ? null : (int)$config->get("server.port"),
+	);
 	$authorization = $request->getHeaderLine("Authorization");
 	if($authorization !== "" && !str_starts_with($authorization, "Bearer ")) {
 		$document->error("Expected a bearer token.", 401);

@@ -1,0 +1,23 @@
+#!/usr/bin/env php
+<?php
+use App\ApplicationRepository;
+use App\DockerRuntime;
+use GT\Config\ConfigFactory;
+
+require __DIR__ . "/../vendor/autoload.php";
+chdir(dirname(__DIR__));
+umask(0077);
+$config = (new ConfigFactory())->createForProject(getcwd());
+$runtime = new DockerRuntime(
+	database: $config->get("docker.database") ?? "sqlite",
+	phpVersion: $config->get("docker.php_version") ?? "8.4",
+	healthPath: $config->get("docker.health_path") ?? "/",
+);
+$repository = new ApplicationRepository();
+$watch = in_array("--watch", $argv, true);
+do {
+	$worked = $repository->configureNext($runtime) || $repository->buildNext($runtime);
+	if($watch && !$worked) {
+		sleep(1);
+	}
+} while($watch);

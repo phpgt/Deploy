@@ -67,6 +67,62 @@ Ignore `config.*.ini` in Git. The CLI warns if `config.dev.ini` is not effective
 ignored, including when it is already tracked. It does not edit your project's
 `.gitignore` automatically. Neither terminal output nor archives include the saved token.
 
+## Deployment environments
+
+With no flag, `gt deploy` continues to use the project's normal `[deploy]`
+configuration. Select a separate destination with:
+
+```sh
+gt deploy --staging
+gt deploy --production
+```
+
+The first run asks for the deployment server and transport, then creates
+`deploy.staging.ini` or `deploy.production.ini`:
+
+```ini
+[deploy]
+server=deploy.php.gt
+transport=tar-http
+```
+
+`tar-http` is the only current `Transport` enum value. Unsupported transports
+are rejected; Git and rsync transports are not implemented. HTTPS is assumed
+when the server has no scheme. After saving a new file, the command asks whether
+to deploy immediately, defaulting to no. Subsequent runs use the existing file
+without prompting. Both fields are required in an environment file; incomplete
+files fail rather than silently falling back to the default destination. Setup
+can read piped answers, and fails on EOF rather than waiting forever.
+
+Environment files can be committed. Tokens stay in the ignored `config.dev.ini`:
+
+```ini
+[deployment]
+staging_token=...
+staging_token_server=https://deploy.php.gt
+production_token=...
+production_token_server=https://deploy.php.gt
+```
+
+Each environment reserves and updates its own deployment, even when both use the
+same server. Token expiry renews only the selected environment. Changing an
+environment's server requires removing that environment's token and token-server
+keys. The default deployment still uses `deploy.token` and `deploy.token_server`.
+Both `[deploy]` and `[deployment]` are excluded from configuration uploads.
+
+Configuration changes use the selected destination too:
+
+```sh
+gt deploy config-set email.api_key --staging
+gt deploy config-set '*' --production
+```
+
+Place the environment flag after `config-set` arguments for compatibility with
+the currently required GT\Cli release. `--staging` and `--production` cannot be
+combined. Environment selection changes the deployment destination, not the
+application's runtime mode. Environment destination files are excluded from the
+uploaded archive.
+
 ## Deployment configuration
 
 After a successful deployment, the CLI lists missing or blank keys found in local
@@ -82,7 +138,7 @@ gt deploy config-set '*'
 Values come from the local override files; they are never command arguments or
 printed in the terminal. Quote `'*'` to prevent shell expansion. Standard override
 files follow GT\Config precedence; custom override files are read first, in
-alphabetical order. Only scalar values are supported. `[deploy]` and
+alphabetical order. Only scalar values are supported. `[deploy]`, `[deployment]` and
 `app.production` are excluded. Explicit `false` and `0` count as configured.
 
 The command authenticates using the saved deployment token and sends the selected
@@ -103,7 +159,7 @@ successful deployment's exit code.
 ## Source exclusions
 
 The archive excludes root `cache`, `test`, `vendor` and `node_modules` directories,
-Git and IDE metadata, `.env` files, `config.*.ini` overrides, common local database
+Git and IDE metadata, `.env` files, `config.*.ini` overrides, `deploy.*.ini` destinations, common local database
 files, private keys and `.ssh`. Add project-specific tar patterns to `.deployignore`.
 `config.ini` is included: keep local credentials in excluded overrides.
 

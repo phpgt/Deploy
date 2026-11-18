@@ -1,6 +1,9 @@
 <?xml version="1.0"?>
 <phpunit bootstrap="vendor/autoload.php" failOnWarning="true" failOnRisky="true">
 	<testsuites>
+		<testsuite name="unit">
+			<directory>test/phpunit</directory>
+		</testsuite>
 		<testsuite name="integration">
 			<directory>test/integration</directory>
 		</testsuite>

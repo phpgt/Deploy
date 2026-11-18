@@ -31,7 +31,7 @@ readonly class ConfigurationValues {
 	private function validateValue(mixed $key, mixed $value):void {
 		if(!is_string($key) || !is_string($value)
 		|| !preg_match('/^[A-Za-z_][A-Za-z0-9_-]*\.[A-Za-z_][A-Za-z0-9_.-]*$/D', $key)
-		|| str_starts_with($key, "deploy.") || $key === "app.production") {
+		|| str_starts_with($key, "deploy.") || str_starts_with($key, "deployment.") || $key === "app.production") {
 			throw new RuntimeException("Configuration contains an invalid or managed key, or a non-string value.", 400);
 		}
 	}

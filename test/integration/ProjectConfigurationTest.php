@@ -2,6 +2,8 @@
 namespace GT\Deploy\Test\Integration;
 
 use GT\Deploy\ProjectConfiguration;
+use GT\Deploy\DeploymentEnvironment;
+use GT\Deploy\Transport;
 use GT\Deploy\ProcessRunner;
 use PHPUnit\Framework\TestCase;
 
@@ -30,8 +32,34 @@ class ProjectConfigurationTest extends TestCase {
 		rmdir($this->directory);
 	}
 
+	public function testSaveEnvironment_keepsDestinationCommittableAndTokensPrivate():void {
+		file_put_contents("$this->directory/config.ini", "[deploy]\nserver=https://unused.example\n");
+		$sut = new ProjectConfiguration();
+		$sut->saveEnvironment($this->directory, DeploymentEnvironment::Production, "http://localhost:9090", Transport::TarHttp);
+		$sut->saveToken($this->directory, "default-token", "https://unused.example");
+		$sut->saveToken($this->directory, "stage-token", "http://localhost:9090", DeploymentEnvironment::Staging);
+		$sut->saveToken($this->directory, "prod-token", "http://localhost:9090", DeploymentEnvironment::Production);
+		$settings = $sut->loadSettings($this->directory, DeploymentEnvironment::Production);
+		self::assertSame("prod-token", $settings->token);
+		self::assertSame("http://localhost:9090", $settings->server);
+		$private = parse_ini_file("$this->directory/config.dev.ini", true);
+		self::assertSame("default-token", $private["deploy"]["token"]);
+		self::assertSame("stage-token", $private["deployment"]["staging_token"]);
+		self::assertSame("prod-token", $private["deployment"]["production_token"]);
+		self::assertStringNotContainsString("token", file_get_contents("$this->directory/deploy.production.ini"));
+		self::assertSame([], $sut->getOverrideKeys($this->directory));
+	}
+
+	public function testLoadSettings_missingEnvironmentDoesNotFallBackToDefault():void {
+		file_put_contents("$this->directory/config.ini", "[deploy]\nserver=deploy.php.gt\n");
+		$sut = new ProjectConfiguration();
+		$this->expectException(\RuntimeException::class);
+		$this->expectExceptionMessage("gt deploy --staging");
+		$sut->loadSettings($this->directory, DeploymentEnvironment::Staging);
+	}
+
 	public function testGetOverrideValues_selectsKeySectionAndAllWithoutManagedValues():void {
-		file_put_contents("$this->directory/config.dev.ini", "[deploy]\ntoken=not-for-upload\n[app]\nproduction=false\n[email]\napi_key=development-key\nenabled=false\nport=0\n[other]\nname=example\n");
+		file_put_contents("$this->directory/config.dev.ini", "[deploy]\ntoken=not-for-upload\n[deployment]\nproduction_token=also-not-for-upload\n[app]\nproduction=false\n[email]\napi_key=development-key\nenabled=false\nport=0\n[other]\nname=example\n");
 		file_put_contents("$this->directory/config.remote.ini", "[email]\napi_key=production-key\n");
 		$sut = new ProjectConfiguration();
 		self::assertSame(["email.api_key" => "development-key"], $sut->getOverrideValues($this->directory, "email.api_key"));

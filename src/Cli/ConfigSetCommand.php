@@ -6,7 +6,6 @@ use Gt\Cli\Argument\Argument;
 use Gt\Cli\Command\Command;
 use Gt\Cli\Parameter\NamedParameter;
 use Gt\Cli\Stream;
-use GT\Config\ConfigFactory;
 use GT\Deploy\DeploymentClient;
 use GT\Deploy\ProjectConfiguration;
 use GT\Deploy\Settings;
@@ -14,16 +13,19 @@ use RuntimeException;
 use Throwable;
 
 class ConfigSetCommand extends Command {
+	public function __construct(private Settings $settings) {
+	}
+
 	public function run(?ArgumentValueList $arguments = null):int {
 		try {
 			if(!$arguments?->contains("selector") || $arguments->contains(Argument::USER_DATA)) {
 				throw new RuntimeException("Use gt deploy config-set <key|section|'*'>. Quote '*' to select all keys.");
 			}
 			$directory = (string)getcwd();
-			$config = (new ConfigFactory())->createForProject($directory, "$directory/vendor/phpgt/webengine/config.default.ini");
-			$settings = new Settings($config);
+			$settings = $this->settings;
 			if($settings->token === null) {
-				throw new RuntimeException("Run gt deploy before setting deployment configuration.");
+				$option = $settings->environment === null ? "" : " --{$settings->environment->value}";
+				throw new RuntimeException("Run gt deploy$option before setting deployment configuration.");
 			}
 			$values = (new ProjectConfiguration())->getOverrideValues($directory, (string)$arguments->get("selector"));
 			(new DeploymentClient())->setConfiguration($settings->server, $settings->token, $values, function(string $url):void {

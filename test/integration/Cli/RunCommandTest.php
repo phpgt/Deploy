@@ -75,6 +75,138 @@ class RunCommandTest extends TestCase {
 		rmdir($this->directory);
 	}
 
+	public function testRun_newEnvironmentCanBeSavedWithoutDeploying():void {
+		[$code, $output, $error] = $this->runCliWithInput("$this->server\ntar-http\nn\n", "--staging");
+		self::assertSame(0, $code, $error);
+		$config = parse_ini_file("$this->directory/project/deploy.staging.ini", true);
+		self::assertSame($this->server, $config["deploy"]["server"]);
+		self::assertSame("tar-http", $config["deploy"]["transport"]);
+		self::assertStringContainsString("Deploy to staging now?", $output);
+		self::assertStringNotContainsString("Packaging", $output);
+		self::assertFileDoesNotExist("$this->directory/project/config.dev.ini");
+		self::assertSame([], glob("$this->directory/server/data/deployment/*/reservation.json"));
+	}
+
+	public function testRun_newEnvironmentUsesDefaultsAndDoesNotDeployByDefault():void {
+		[$code, $output, $error] = $this->runCliWithInput("\n\n\n", "--production");
+		self::assertSame(0, $code, $error);
+		$config = parse_ini_file("$this->directory/project/deploy.production.ini", true);
+		self::assertSame(["server" => "deploy.php.gt", "transport" => "tar-http"], $config["deploy"]);
+		self::assertStringNotContainsString("Packaging", $output);
+		self::assertSame([], glob("$this->directory/server/data/deployment/*/reservation.json"));
+	}
+
+	public function testRun_newEnvironmentDoesNotDeployWhenConfirmationInputEnds():void {
+		[$code, $output, $error] = $this->runCliWithInput("$this->server\ntar-http\n", "--staging");
+		self::assertSame(1, $code);
+		self::assertStringContainsString("Input ended", $error);
+		self::assertFileExists("$this->directory/project/deploy.staging.ini");
+		self::assertStringNotContainsString("Packaging", $output);
+		self::assertSame([], glob("$this->directory/server/data/deployment/*/reservation.json"));
+	}
+
+	public function testRun_newEnvironmentRetriesInvalidServer():void {
+		[$code, $output, $error] = $this->runCliWithInput("ftp://invalid\ntar-http\n$this->server\ntar-http\nn\n", "--staging");
+		self::assertSame(0, $code, $error);
+		self::assertStringContainsString("HTTP or HTTPS", $output);
+		$config = parse_ini_file("$this->directory/project/deploy.staging.ini", true);
+		self::assertSame($this->server, $config["deploy"]["server"]);
+	}
+
+	public function testRun_invalidEnvironmentTransportDoesNotUseDefaultDestination():void {
+		file_put_contents("$this->directory/project/config.ini", "[deploy]\nserver=$this->server\n");
+		file_put_contents("$this->directory/project/deploy.production.ini", "[deploy]\nserver=$this->server\ntransport=rsync\n");
+		[$code, $output, $error] = $this->runCli("--production");
+		self::assertSame(1, $code);
+		self::assertStringContainsString("Unsupported deploy.transport", $error);
+		self::assertSame([], glob("$this->directory/server/data/deployment/*/reservation.json"));
+	}
+
+	public function testRun_newEnvironmentCanDeployAfterConfirmation():void {
+		file_put_contents("$this->directory/project/config.ini", "[deploy]\nserver=https://unused.example\n");
+		[$code, $output, $error] = $this->runCliWithInput("$this->server\ntar-http\nyes\n", "--production");
+		$this->removeArchive($output);
+		self::assertSame(0, $code, $error);
+		self::assertStringContainsString("Packaging", $output);
+		$config = parse_ini_file("$this->directory/project/config.dev.ini", true);
+		self::assertNotEmpty($config["deployment"]["production_token"]);
+		self::assertArrayNotHasKey("deploy", $config);
+	}
+
+	public function testRun_environmentTokensAndConfigSetStaySeparate():void {
+		file_put_contents("$this->directory/project/config.ini", "[deploy]\nserver=$this->server\n");
+		file_put_contents("$this->directory/project/config.dev.ini", "[email]\napi_key=environment-private-key\n");
+		foreach(["staging", "production"] as $environment) {
+			file_put_contents("$this->directory/project/deploy.$environment.ini", "[deploy]\nserver=$this->server\ntransport=tar-http\n");
+		}
+		[$code, $output, $error] = $this->runCli();
+		$this->removeArchive($output);
+		self::assertSame(0, $code, $error);
+		[$code, $output, $error] = $this->runCli("--staging");
+		$this->removeArchive($output);
+		self::assertSame(0, $code, $error);
+		self::assertStringContainsString("gt deploy config-set 'email.api_key' --staging", $output);
+		[$code, $output, $error] = $this->runCli("--production");
+		$this->removeArchive($output);
+		self::assertSame(0, $code, $error);
+		$config = parse_ini_file("$this->directory/project/config.dev.ini", true);
+		$production = $config["deployment"]["production_token"];
+		$staging = $config["deployment"]["staging_token"];
+		self::assertCount(3, array_unique([$config["deploy"]["token"], $production, $staging]));
+		[$code, $output, $error] = $this->runCli("config-set", "*", "--production");
+		self::assertSame(0, $code, $error);
+		$id = substr(hash("sha256", $production), 0, 16);
+		$applied = json_decode(file_get_contents("$this->directory/server/data/deployment/$id/fixture-config.json"), true);
+		self::assertSame(["email.api_key" => "environment-private-key"], $applied);
+		$stageId = substr(hash("sha256", $staging), 0, 16);
+		self::assertFileDoesNotExist("$this->directory/server/data/deployment/$stageId/fixture-config.json");
+		[$code, $output, $error] = $this->runCli("--production");
+		$this->removeArchive($output);
+		self::assertSame(0, $code, $error);
+		self::assertCount(3, glob("$this->directory/server/data/deployment/*/reservation.json"));
+		self::assertSame($config, parse_ini_file("$this->directory/project/config.dev.ini", true));
+	}
+
+	public function testRun_expiredEnvironmentTokenIsReplacedWithoutChangingOtherTokens():void {
+		$token = str_repeat("0", 10) . str_repeat("A", 32);
+		$id = substr(hash("sha256", $token), 0, 16);
+		$path = "$this->directory/server/data/deployment/$id";
+		mkdir($path, 0700, true);
+		file_put_contents("$path/reservation.json", json_encode([
+			"id" => $id, "url" => "https://$id.deploy.php.gt", "status" => "reserved",
+			"token_hash" => hash("sha256", $token), "created_at" => gmdate("c", 0),
+			"expires_at" => gmdate("c", 86400), "uploaded_bytes" => 0,
+			"archive" => null, "source" => null,
+		], JSON_THROW_ON_ERROR));
+		file_put_contents("$this->directory/project/config.ini", "[deploy]\nserver=$this->server\n");
+		file_put_contents("$this->directory/project/deploy.production.ini", "[deploy]\nserver=$this->server\ntransport=tar-http\n");
+		file_put_contents("$this->directory/project/config.dev.ini", "[deploy]\ntoken=default-sentinel\n[deployment]\nstaging_token=staging-sentinel\nproduction_token=$token\nproduction_token_server=$this->server\n");
+		[$code, $output, $error] = $this->runCli("--production");
+		$this->removeArchive($output);
+		self::assertSame(0, $code, $error);
+		self::assertStringContainsString("Previous anonymous deployment expired", $output);
+		$config = parse_ini_file("$this->directory/project/config.dev.ini", true);
+		self::assertNotSame($token, $config["deployment"]["production_token"]);
+		self::assertSame("default-sentinel", $config["deploy"]["token"]);
+		self::assertSame("staging-sentinel", $config["deployment"]["staging_token"]);
+	}
+
+	public function testRun_environmentSetupRejectsInvalidInputAndHandlesEof():void {
+		[$code, $output, $error] = $this->runCliWithInput("$this->server\nrsync\n", "--staging");
+		self::assertSame(1, $code);
+		self::assertStringContainsString("Choose one of the listed transports", $output);
+		self::assertStringContainsString("Input ended", $error);
+		self::assertFileDoesNotExist("$this->directory/project/deploy.staging.ini");
+	}
+
+	public function testRun_cannotSelectBothEnvironments():void {
+		[$code, $output, $error] = $this->runCli("--staging", "--production");
+		self::assertSame(1, $code);
+		self::assertStringContainsString("not both", $error);
+		self::assertFileDoesNotExist("$this->directory/project/deploy.staging.ini");
+		self::assertFileDoesNotExist("$this->directory/project/deploy.production.ini");
+	}
+
 	public function testRun_listsOnlyUnsetOverrideKeysAfterDeployWithoutTheirValues():void {
 		file_put_contents("$this->directory/project/config.ini", "[deploy]\nserver=$this->server\n[mail]\nconfigured=production-value\nblank=\n[flags]\nzero=0\ndisabled=false\n");
 		$this->git("add", "config.ini");
@@ -90,7 +222,7 @@ class RunCommandTest extends TestCase {
 		self::assertStringNotContainsString("gt deploy config-set 'deploy.", $output);
 		self::assertStringNotContainsString("private-", $output . $error);
 		self::assertStringNotContainsString("local-value", $output . $error);
-		self::assertLessThan(strpos($output, "gt deploy config-set"), strpos($output, "Deployed:"));
+		self::assertLessThan(strpos($output, "gt deploy config-set"), strpos($output, "Finished deployment:"));
 	}
 
 	public function testRun_configSetSendsSelectedLocalValuesWithoutRebuilding():void {
@@ -216,7 +348,7 @@ class RunCommandTest extends TestCase {
 		$this->removeArchive($output);
 		self::assertSame(1, $exitCode);
 		self::assertStringContainsString("Deployment build failed", $error);
-		self::assertStringNotContainsString("Deployed:", $output);
+		self::assertStringNotContainsString("Finished deployment:", $output);
 	}
 	public function testRun_expiredDeploymentIsReplacedWithoutManualConfigChanges():void {
 		$token = str_repeat("0", 10) . str_repeat("A", 32);
@@ -237,7 +369,7 @@ class RunCommandTest extends TestCase {
 		self::assertSame(0, $exitCode, $error);
 		$plainOutput = preg_replace('/\x1b\[[0-9;]*[A-Za-z]/', "", $output);
 		self::assertMatchesRegularExpression('/^https:\/\/[a-f0-9]{16}\.deploy\.php\.gt\nPrevious anonymous deployment expired\. Reserved a new URL\./', $plainOutput);
-		self::assertStringContainsString("Deployed:", $output);
+		self::assertStringContainsString("Finished deployment:", $output);
 		self::assertStringNotContainsString($token, $output . $error);
 		$config = parse_ini_file("$this->directory/project/config.dev.ini", true);
 		self::assertNotSame($token, $config["deploy"]["token"]);
@@ -326,6 +458,11 @@ class RunCommandTest extends TestCase {
 
 	/** @return array{int, string, string} */
 	private function runCli(string ...$arguments):array {
+		return $this->runCliWithInput("", ...$arguments);
+	}
+
+	/** @return array{int, string, string} */
+	private function runCliWithInput(string $input, string ...$arguments):array {
 		$process = proc_open(
 			[PHP_BINARY, __DIR__ . "/../../../bin/deploy", ...$arguments],
 			[0 => ["pipe", "r"], 1 => ["pipe", "w"], 2 => ["pipe", "w"]],
@@ -333,6 +470,7 @@ class RunCommandTest extends TestCase {
 			"$this->directory/project",
 		);
 		self::assertIsResource($process);
+		fwrite($pipes[0], $input);
 		fclose($pipes[0]);
 		$output = stream_get_contents($pipes[1]);
 		$error = stream_get_contents($pipes[2]);

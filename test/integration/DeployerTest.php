@@ -34,6 +34,7 @@ class DeployerTest extends TestCase {
 	public function testDeploy_excludesLocalFilesAndReportsActualContents():void {
 		file_put_contents("$this->directory/page.html", "hello");
 		file_put_contents("$this->directory/config.production.ini", "secret");
+		file_put_contents("$this->directory/deploy.production.ini", "[deploy]\nserver=deploy.php.gt\ntransport=tar-http\n");
 		file_put_contents("$this->directory/.env", "secret");
 		file_put_contents("$this->directory/local.sqlite-wal", "database contents");
 		file_put_contents("$this->directory/private.key", "credentials");
@@ -49,7 +50,7 @@ class DeployerTest extends TestCase {
 			self::assertStringEndsWith(".tar.gz", $package["archive"]);
 			$archive = new PharData($package["archive"]);
 			self::assertSame("hello", $archive["page.html"]->getContent());
-			foreach(["config.production.ini", ".env", "local.sqlite-wal", "private.key", "private.txt"] as $excluded) {
+			foreach(["config.production.ini", "deploy.production.ini", ".env", "local.sqlite-wal", "private.key", "private.txt"] as $excluded) {
 				self::assertFalse(isset($archive[$excluded]));
 			}
 		}

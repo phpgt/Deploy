@@ -106,7 +106,8 @@ Send `Accept: application/json` on all endpoints:
   key names from the last successful activation. Values are never returned.
   An application without this metadata must be redeployed before inspection.
 - `POST /configuration/` accepts a JSON object `{"values":{"email.api_key":"…"}}`
-  with bearer authorization. It queues a configuration update for the active
+  with bearer authorization. Keys in `[deploy]` and `[deployment]` are rejected.
+  It queues a configuration update for the active
   release and returns its ID and deployment URL.
 - `GET /configuration/?job=<id>` returns authenticated update status: `queued`,
   `applying`, `applied` or `failed`, without values. The Docker worker invokes

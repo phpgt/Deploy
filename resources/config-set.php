@@ -22,7 +22,7 @@ try {
 	$sections = [];
 	foreach($values as $name => $value) {
 		if(!is_string($value) || !preg_match('/^[A-Za-z_][A-Za-z0-9_-]*\.[A-Za-z_][A-Za-z0-9_.-]*$/D', $name)
-		|| str_starts_with($name, "deploy.") || $name === "app.production") {
+		|| str_starts_with($name, "deploy.") || str_starts_with($name, "deployment.") || $name === "app.production") {
 			throw new RuntimeException("Invalid configuration key or value.");
 		}
 		[$section, $key] = explode(".", $name, 2);

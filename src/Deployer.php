@@ -34,7 +34,7 @@ class Deployer {
 	}
 
 	private function package(string $directory, string $archive):int {
-		$exclude = ["/cache", "/test", "/vendor", "/node_modules", ".git", ".idea", ".env", ".env.*", "config.*.ini", "*.sqlite*", "*.db", "*.db-*", "*.sql.gz", "*.pem", "*.key", ".ssh"];
+		$exclude = ["/cache", "/test", "/vendor", "/node_modules", ".git", ".idea", ".env", ".env.*", "config.*.ini", "deploy.*.ini", "*.sqlite*", "*.db", "*.db-*", "*.sql.gz", "*.pem", "*.key", ".ssh"];
 		$command = ["tar", "-czvf", $archive, "--hard-dereference", "--quoting-style=escape", "--transform=s,^\\./,,"];
 		foreach($exclude as $pattern) {
 			$command []= "--exclude=" . (str_starts_with($pattern, "/") ? ".$pattern" : $pattern);

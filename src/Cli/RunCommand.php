@@ -7,7 +7,9 @@ use Gt\Cli\Palette;
 use Gt\Cli\Parameter\NamedParameter;
 use Gt\Cli\Parameter\Parameter;
 use Gt\Cli\Stream;
-use GT\Config\ConfigFactory;
+use GT\Deploy\DeploymentEnvironment;
+use GT\Deploy\Transport;
+use InvalidArgumentException;
 use GT\Deploy\Deployer;
 use GT\Deploy\DeploymentClient;
 use GT\Deploy\Settings;
@@ -23,21 +25,17 @@ class RunCommand extends Command {
 	// phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.FoundInExtendedClass
 	public function run(?ArgumentValueList $arguments = null):int {
 		try {
+			$directory = (string)getcwd();
+			$environment = $this->selectEnvironment($arguments);
+			$projectConfig = new ProjectConfiguration();
 			if($arguments?->contains("action")) {
-				if((string)$arguments->get("action") !== "config-set") {
-					throw new RuntimeException("Use gt deploy or gt deploy config-set <key|section|'*'>.");
-				}
-				$command = new ConfigSetCommand();
-				$command->setStream($this->stream);
-				return $command->run($arguments);
+				return $this->runAction($arguments, $projectConfig->loadSettings($directory, $environment));
+			}
+			if(!$this->prepareEnvironment($projectConfig, $directory, $environment)) {
+				return 0;
 			}
 			$timeStart = microtime(true);
-			$directory = (string)getcwd();
-			$config = (new ConfigFactory())->createForProject(
-				$directory,
-				"$directory/vendor/phpgt/webengine/config.default.ini",
-			);
-			$settings = new Settings($config);
+			$settings = $projectConfig->loadSettings($directory, $environment);
 			$client = new DeploymentClient();
 			$reservation = $client->reserve($settings->server, $settings->token);
 			$timeReserved = microtime(true);
@@ -48,9 +46,8 @@ class RunCommand extends Command {
 			$this->writeLine($reservation->url);
 			$this->resetOutputPalette();
 
-			$projectConfig = new ProjectConfiguration();
 			if($settings->token !== $reservation->token) {
-				$projectConfig->saveToken($directory, $reservation->token, $settings->server);
+				$projectConfig->saveToken($directory, $reservation->token, $settings->server, $environment);
 				if($settings->token !== null) {
 					$this->writeLine("Previous anonymous deployment expired. Reserved a new URL.");
 				}
@@ -97,6 +94,73 @@ class RunCommand extends Command {
 		}
 	}
 
+	private function runAction(ArgumentValueList $arguments, Settings $settings):int {
+		if((string)$arguments->get("action") !== "config-set") {
+			throw new RuntimeException("Use gt deploy or gt deploy config-set <key|section|'*'>.");
+		}
+		$command = new ConfigSetCommand($settings);
+		$command->setStream($this->stream);
+		return $command->run($arguments);
+	}
+
+	// PHP exposes enum selection through built-in static methods.
+	/** @SuppressWarnings("PHPMD.StaticAccess") */
+	private function selectEnvironment(?ArgumentValueList $arguments):?DeploymentEnvironment {
+		if($arguments?->contains("staging") && $arguments->contains("production")) {
+			throw new RuntimeException("Choose either --staging or --production, not both.");
+		}
+		foreach(DeploymentEnvironment::cases() as $environment) {
+			if($arguments?->contains($environment->value)) {
+				return $environment;
+			}
+		}
+		return null;
+	}
+
+	private function prepareEnvironment(ProjectConfiguration $project, string $directory, ?DeploymentEnvironment $environment):bool {
+		if($environment === null || is_file("$directory/deploy.$environment->value.ini")) {
+			return true;
+		}
+		return $this->configureEnvironment($project, $directory, $environment);
+	}
+
+	// PHP exposes enum selection through built-in static methods.
+	/** @SuppressWarnings("PHPMD.StaticAccess") */
+	private function configureEnvironment(ProjectConfiguration $project, string $directory, DeploymentEnvironment $environment):bool {
+		$this->writeLine("Creating deploy.$environment->value.ini");
+		do {
+			$server = $this->ask("Deployment server", "deploy.php.gt");
+			$options = implode(", ", array_column(Transport::cases(), "value"));
+			$transport = Transport::tryFrom($this->ask("Transport ($options)", Transport::TarHttp->value));
+			if($transport === null) {
+				$this->writeLine("Choose one of the listed transports.");
+				continue;
+			}
+			try {
+				$project->saveEnvironment($directory, $environment, $server, $transport);
+				break;
+			}
+			catch(InvalidArgumentException $exception) {
+				$this->writeLine($exception->getMessage());
+			}
+		} while(true);
+		$this->writeLine("Created deploy.$environment->value.ini");
+		do {
+			$answer = strtolower($this->ask("Deploy to $environment->value now? (y/N)", "n"));
+		} while(!in_array($answer, ["y", "yes", "n", "no"], true));
+		return in_array($answer, ["y", "yes"], true);
+	}
+
+	private function ask(string $question, string $default):string {
+		$this->write("$question [$default] > ");
+		// Read one line without consuming subsequent piped answers, and fail on EOF.
+		$line = $this->stream?->getInStream()->fgets();
+		if($line === null || $line === "") {
+			throw new RuntimeException("Input ended. Run the command interactively to finish environment setup.");
+		}
+		return trim($line) ?: $default;
+	}
+
 	private function reportUnsetConfiguration(string $directory, ProjectConfiguration $project, DeploymentClient $client, Settings $settings, Reservation $reservation):void {
 		try {
 			$keys = $project->getOverrideKeys($directory);
@@ -110,7 +174,8 @@ class RunCommand extends Command {
 			$this->writeLine();
 			$this->writeLine("To deploy config values, run the following commands.");
 			foreach($missing as $key) {
-				$this->writeLine("  gt deploy config-set " . escapeshellarg($key));
+				$option = $settings->environment === null ? "" : " --{$settings->environment->value}";
+				$this->writeLine("  gt deploy config-set " . escapeshellarg($key) . $option);
 			}
 		}
 		catch(Throwable) {
@@ -173,6 +238,9 @@ class RunCommand extends Command {
 
 	/** @return Parameter[] */
 	public function getOptionalParameterList():array {
-		return [];
+		return [
+			new Parameter(false, "staging", documentation: "Deploy using deploy.staging.ini; create it interactively if missing."),
+			new Parameter(false, "production", documentation: "Deploy using deploy.production.ini; create it interactively if missing."),
+		];
 	}
 }

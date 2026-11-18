@@ -15,7 +15,7 @@ readonly class ProjectConfiguration {
 		foreach(glob("$directory/config.*.ini") ?: [] as $file) {
 			$config = $this->parseOverride($file);
 			foreach($config->getSectionNames() as $sectionName) {
-				if($sectionName === "deploy") {
+				if(in_array($sectionName, ["deploy", "deployment"], true)) {
 					continue;
 				}
 				foreach(array_keys($config->getSection($sectionName)?->asArray() ?? []) as $key) {
@@ -36,7 +36,7 @@ readonly class ProjectConfiguration {
 			foreach($config->getSectionNames() as $section) {
 				foreach($config->getSection($section)?->asArray() ?? [] as $key => $value) {
 					$name = "$section.$key";
-					if($section !== "deploy" && $name !== "app.production") {
+					if(!in_array($section, ["deploy", "deployment"], true) && $name !== "app.production") {
 						$values[$name] = $value;
 					}
 				}
@@ -98,9 +98,34 @@ readonly class ProjectConfiguration {
 		}
 	}
 
-	public function saveToken(string $directory, string $token, string $server):void {
+	public function loadSettings(string $directory, ?DeploymentEnvironment $environment = null):Settings {
+		$config = (new ConfigFactory())->createForProject($directory, "$directory/vendor/phpgt/webengine/config.default.ini");
+		$destination = null;
+		if($environment !== null) {
+			$path = "$directory/deploy.$environment->value.ini";
+			if(!is_file($path)) {
+				throw new RuntimeException("Run gt deploy --$environment->value to configure this environment first.");
+			}
+			$destination = $this->parseOverride($path);
+		}
+		return new Settings($config, $environment, $destination);
+	}
+
+	public function saveEnvironment(string $directory, DeploymentEnvironment $environment, string $server, Transport $transport):void {
+		$path = "$directory/deploy.$environment->value.ini";
+		if(file_exists($path)) {
+			throw new RuntimeException("deploy.$environment->value.ini already exists.");
+		}
+		$config = new Config(new ConfigSection("deploy", ["server" => $server, "transport" => $transport->value]));
+		new Settings($config);
+		(new FileWriter($config))->writeIni($path);
+	}
+
+	public function saveToken(string $directory, string $token, string $server, ?DeploymentEnvironment $environment = null):void {
 		$path = "$directory/config.dev.ini";
-		$config = new Config(new ConfigSection("deploy", ["token" => $token, "token_server" => $server]));
+		$section = $environment === null ? "deploy" : "deployment";
+		$prefix = $environment === null ? "" : "{$environment->value}_";
+		$config = new Config(new ConfigSection($section, ["{$prefix}token" => $token, "{$prefix}token_server" => $server]));
 		$mask = umask(0077);
 		try {
 			if(is_file($path) && !chmod($path, 0600)) {
